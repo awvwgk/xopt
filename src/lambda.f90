@@ -220,11 +220,11 @@ allocate(Hint(nvar,nvar),he(nvar),U(nvar,nvar))
 ! call dsyev ('V','U',nvar,Hint,nvar,he,aux,lwork,info)
 call DiagSM(nvar,Hint,he)
 
-! gradient along local eigenmode of internal hessian
+! gradient along local eigenmode of internal hessian: F(i) = sum_j U(j,i)*g(j) = (U^T g)_i
 do i=1,nvar
   F(i)=0.0_r8
   do j=1,nvar
-    F(i)=F(i)+Hint(j,i)*gint(i)
+    F(i)=F(i)+Hint(j,i)*gint(j)
   enddo
 enddo
 
@@ -245,13 +245,14 @@ do i=1,nvar
 enddo
 
 
-! take the step
+! take the step: displ(j) = sum_i s_i * U(j,i), with s_i = F(i)/(lambda-he(i))
+! the followed mode uses the upper (maximization) root lam
 displ=0.0_r8
 do i=1,nvar
   temp=F(i)/(lambda-he(i))
   if(i==mode) temp=F(i)/(lam-he(i))
   do j=1,nvar
-   displ(i)=displ(i)+temp*Hint(j,i)
+   displ(j)=displ(j)+temp*Hint(j,i)
   enddo
 enddo
 deallocate(Hint,he,U)
