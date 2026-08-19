@@ -123,8 +123,9 @@ real(r8), allocatable :: eaug(:)
 real(r8), allocatable :: aux (:)
 real(r8), allocatable :: Uaug(:,:)
 real(r8), allocatable :: S(:,:)
+real(r8), allocatable :: sdiag(:)
 real(r8) displ(nvar),lam
-real(r8) soff,sdiag,dnrm2
+real(r8) soff,hfloor,scap,smin
 integer liwork
 integer, allocatable :: iwork(:)
 
@@ -135,6 +136,7 @@ liwork= 3 + 5*nvar1
 allocate(Uaug(nvar+1,nvar+1),eaug(nvar+1),aux(lwork))
 allocate (iwork(liwork))
 allocate(S(nvar1,nvar1))
+allocate(sdiag(nvar))
 
 
 ! augment hessian by grad:
@@ -145,18 +147,32 @@ allocate(S(nvar1,nvar1))
             k=k+1
             Uaug(i,j)=hint(k)
             Uaug(j,i)=hint(k)
+            if(i==j) sdiag(i)=hint(k)   ! grab the mode force constant h_i on the diagonal
          enddo
       enddo
       Uaug(1:nvar,nvar+1)=gint(1:nvar)
       Uaug(nvar+1,1:nvar)=gint(1:nvar)
 
-! form scaling matrix S
-!dnrm2(nvar,gint,1)
-      ! sdiag=1.0_r8/sqrt(dble(nvar))
-      sdiag=sqrt(dble(nvar))
+! form scaling matrix S = diag(s_1,...,s_nvar, 1)
+! Robust per-mode SIRFO metric (replaces the old constant sdiag=sqrt(nvar)*I).
+! In the eigenbasis the RFO step is x_i = -g_i/(h_i - lam*s_i); choosing
+! s_i ~ 1/h_i makes the shift lam*s_i LARGE on soft modes so the soft-mode
+! denominator never nears zero -> soft-mode overstep is auto-damped, while
+! stiff modes (s_i -> 1) stay near-Newton. This is a per-mode, direction-
+! preserving trust region and REPLACES the crude maxd step clip in the caller.
+! A constant metric (the old sqrt(nvar)) is only a global step-length knob and
+! cannot tell soft modes from stiff ones -- hence it never improved things.
+      hfloor = 1.0e-3_r8   ! floor on |h_i| so a ~0 (trans/rot residual) mode can't blow s_i
+      scap   = 50.0_r8     ! cap softest-mode damping so very soft modes still move
+      do i=1,nvar
+         sdiag(i)=1.0_r8/max(abs(sdiag(i)),hfloor)
+      enddo
+      smin=minval(sdiag(1:nvar))              ! stiffest mode
+      sdiag(1:nvar)=sdiag(1:nvar)/smin        ! normalize: stiffest mode -> s=1 (near-Newton)
+      do i=1,nvar
+         sdiag(i)=min(sdiag(i),scap)
+      enddo
       soff=0.0_r8
-! meh, a really good scaling would improve things. sqrt(natoms) is ok, but the RFO correction
-! is be too small sometimes.
 
       S = 0.0_r8
       k = 0
@@ -165,7 +181,7 @@ allocate(S(nvar1,nvar1))
             k=k+1
             S(i,j)=soff
             S(j,i)=soff
-            if(i==j) S(i,j)=sdiag
+            if(i==j) S(i,j)=sdiag(i)
          enddo
       enddo
       S(1:nvar,nvar1)=0.0_r8
